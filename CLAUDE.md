@@ -38,7 +38,7 @@ docs/       protocol.md, test evidence (docs/evidence/), course PDFs + markdown 
 - Only free tools and services.
 
 ## Deliverables
-- Report 1 (PCB + BLE + edge communication): 30/10/2026
+- Report 1 (PCB + BLE + edge communication): 06/11/2026 (moved from 30/10/2026)
 - Lab evaluation (live demo): 07/01/2027
 - Report 2 (backend + frontend + code zip/GitHub): 10/01/2027
 - Required report structure: see `docs/course/IoT-lab-guide.md` (includes per-layer testing, end-to-end testing and test evidence — keep logs/screenshots in `docs/evidence/`).

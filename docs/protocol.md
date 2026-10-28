@@ -15,6 +15,7 @@ The nRF52840-DK is a BLE peripheral (GATT server). The phone is the central.
 | Data characteristic    | `5781a4a8-0002-41a3-b91f-baa566bff75f` (Notify only) |
 | CCCD                   | `00002902-0000-1000-8000-00805f9b34fb` (write `0x0001` to enable notifications) |
 | Notification period    | 2 s (DHT11 max. is about 1 reading/s) |
+| Security               | None: no pairing/bonding, the link is not encrypted (decided 28 Oct). Simpler for the Flutter app and the demo; a known limitation of the prototype |
 | Byte order             | Little-endian |
 | Frame size             | 15 bytes, fits in one notification with the default MTU (20 B of payload) |
 

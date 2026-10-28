@@ -5,6 +5,8 @@ kept up to date in [`../protocol.md`](../protocol.md).
 
 IoT Laboratory (UAB) — Device + Edge over BLE — Deadline: 30 Oct 2026 (Virtual Campus)
 
+> **Update:** the Report 1 deadline was moved to **6 Nov 2026**. The timeline below is the original plan.
+
 ## 1. Scope of this delivery
 Report 1 covers only the Device (nRF52840-DK sending data over BLE) and the
 Edge (Flutter app on Android receiving and showing that data). Cloud, database

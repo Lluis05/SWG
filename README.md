@@ -33,6 +33,6 @@ Any change must be agreed by the three of us and written there first.
 4. Open a pull request on GitHub; someone else reviews it before merging.
 
 ## Deliverables
-- Report 1 (Device + BLE + Edge): 30/10/2026
+- Report 1 (Device + BLE + Edge): 06/11/2026 (moved from 30/10/2026)
 - Lab evaluation (live demo): 07/01/2027
 - Report 2 (backend + frontend + code): 10/01/2027
