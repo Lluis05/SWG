@@ -1,0 +1,37 @@
+# OS / editors
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.iml
+
+# Firmware (Zephyr / nRF Connect SDK)
+firmware/**/build/
+firmware/**/build_*/
+
+# Flutter / Dart
+app/**/.dart_tool/
+app/**/build/
+app/**/.flutter-plugins
+app/**/.flutter-plugins-dependencies
+app/**/.packages
+app/**/.pub-cache/
+app/**/.pub/
+
+# Android
+app/**/android/.gradle/
+app/**/android/local.properties
+app/**/android/app/debug/
+app/**/android/app/release/
+*.keystore
+*.jks
+
+# Python (cloud / ML)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets
+.env
+*.env
