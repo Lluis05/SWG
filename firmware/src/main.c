@@ -7,13 +7,23 @@
  * connects and enables notifications, it sends one 15-byte frame every 2 s.
  * Frame layout: docs/protocol.md (version 1).
  *
- * Step 2: the frame carries FIXED test values. Buttons, simulation and the
- * DHT11 come in the next steps.
+ * Step 3: posture, piglet scream, crush alarm and water flow are SIMULATED
+ * with the DK buttons. Temperature/humidity are still fixed values (the
+ * DHT11 comes in step 4).
+ *
+ * Buttons (lab simulation of the design's sensors):
+ *   Button 1  sow stands up / lies down   (design: accelerometer)
+ *   Button 2  piglet scream               (design: microphone)
+ *   Button 3  start / stop a water drop   (design: flow meter)
+ *   Button 4  free (step 4: simulate a DHT11 failure)
+ * LEDs:
+ *   LED1 phone connected · LED2 crush alarm · LED3 sow lying · LED4 blinks (running)
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/random/random.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
@@ -26,12 +36,25 @@
 #define DEVICE_NAME      CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN  (sizeof(DEVICE_NAME) - 1)
 
-#define RUN_STATUS_LED   DK_LED1   /* blinks: the program is running */
-#define CON_STATUS_LED   DK_LED2   /* on: a phone is connected */
+#define CON_STATUS_LED   DK_LED1   /* on: a phone is connected */
+#define ALARM_LED        DK_LED2   /* on: crush alarm active */
+#define LYING_LED        DK_LED3   /* on: the sow is lying down */
+#define RUN_STATUS_LED   DK_LED4   /* blinks: the program is running */
+
+#define POSTURE_BUTTON   DK_BTN1_MSK
+#define SCREAM_BUTTON    DK_BTN2_MSK
+#define WATER_BUTTON     DK_BTN3_MSK
 
 #define SEND_PERIOD_MS   2000      /* one frame every 2 s (protocol.md) */
 #define FRAME_LEN        15        /* bytes per frame (protocol.md) */
 #define FRAME_VERSION    1
+
+/* Simulation parameters (agreed 4 Nov). Demo values, NOT real measurements. */
+#define SCREAM_WINDOW_MS   30000   /* a scream counts only up to 30 s after lying down */
+#define WATER_BASE         400     /* normal flow, mL/min */
+#define WATER_NOISE        15      /* random +/- variation, mL/min */
+#define WATER_DROP_STEP    20      /* mL/min less every 2 s while dropping */
+#define WATER_LOW_LIMIT    200     /* below this -> low-water flag */
 
 
 /* ------------------------------------------------------------------------
@@ -146,7 +169,85 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 
 
 /* ------------------------------------------------------------------------
- * 4. Data frame (docs/protocol.md, version 1, little-endian)
+ * 4. Simulation: buttons, crush alarm and water flow
+ * ------------------------------------------------------------------------ */
+
+/* State of the simulated sow. Written by the button callback and read by the
+ * main loop (both are normal threads; 32-bit reads/writes on this CPU are
+ * done in one go, so no lock is needed for these simple variables). */
+static bool     lying;           /* true = sow lying down */
+static uint32_t lying_since_ms;  /* uptime when she lay down */
+static bool     crush_alarm;     /* lying + scream inside the window */
+static bool     water_dropping;  /* Button 3 started a water drop */
+static int      water_base = WATER_BASE;  /* flow without noise, mL/min */
+static int      water;                    /* flow sent in the frame, mL/min */
+
+/* Called by Nordic's DK library when any button changes.
+ * How it works: pressing a button causes a GPIO INTERRUPT; the library then
+ * schedules a short scan in the system work queue (that also removes the
+ * contact bounce) and calls this function from there, not from the interrupt.
+ *   button_state: bit = 1 if that button is pressed now
+ *   has_changed:  bit = 1 if that button changed since last call */
+static void button_changed(uint32_t button_state, uint32_t has_changed)
+{
+	/* We only react when a button is PRESSED (changed AND now pressed). */
+	uint32_t pressed = button_state & has_changed;
+
+	if (pressed & POSTURE_BUTTON) {
+		lying = !lying;
+		if (lying) {
+			lying_since_ms = k_uptime_get_32();
+			printk("Sow lying down: listening for screams for %d s\n",
+			       SCREAM_WINDOW_MS / 1000);
+		} else {
+			/* Standing up clears the alarm (the farmer has checked the crate). */
+			crush_alarm = false;
+			printk("Sow standing up, alarm cleared\n");
+		}
+		dk_set_led(LYING_LED, lying);
+		dk_set_led(ALARM_LED, crush_alarm);
+	}
+
+	if (pressed & SCREAM_BUTTON) {
+		uint32_t since_lying_ms = k_uptime_get_32() - lying_since_ms;
+
+		if (lying && since_lying_ms <= SCREAM_WINDOW_MS) {
+			crush_alarm = true;
+			dk_set_led_on(ALARM_LED);
+			printk("Scream %u ms after lying down -> CRUSH ALARM\n", since_lying_ms);
+		} else {
+			printk("Scream ignored (sow standing or window over)\n");
+		}
+	}
+
+	if (pressed & WATER_BUTTON) {
+		water_dropping = !water_dropping;
+		if (!water_dropping) {
+			water_base = WATER_BASE; /* back to normal at once */
+		}
+		printk("Water drop %s\n", water_dropping ? "started" : "stopped");
+	}
+}
+
+/* Called every 2 s: updates the simulated water flow. */
+static void update_water(void)
+{
+	if (water_dropping && water_base >= WATER_DROP_STEP) {
+		water_base -= WATER_DROP_STEP;
+	}
+
+	/* Random number between -WATER_NOISE and +WATER_NOISE. */
+	int noise = (int)(sys_rand32_get() % (2 * WATER_NOISE + 1)) - WATER_NOISE;
+
+	water = water_base + noise;
+	if (water < 0) {
+		water = 0;
+	}
+}
+
+
+/* ------------------------------------------------------------------------
+ * 5. Data frame (docs/protocol.md, version 1, little-endian)
  * ------------------------------------------------------------------------ */
 
 /* Sequence number. It only goes up when a frame is really sent,
@@ -157,20 +258,27 @@ static uint16_t seq;
  * sys_put_le16/32 write a number byte by byte, least significant byte first. */
 static void build_frame(uint8_t frame[FRAME_LEN])
 {
-	/* Step 2: fixed test values (same as the first test of the app's decoder). */
-	int16_t  temp    = 2345;  /* 23.45 °C  (°C x 100) */
-	uint16_t hum     = 5500;  /* 55.00 %RH (%RH x 100) */
-	uint16_t water   = 350;   /* mL/min */
-	uint8_t  posture = 0;     /* 0 = standing, 1 = lying */
-	uint8_t  flags   = 0;     /* bit0 crush, bit1 low water, bit2 sensor error */
+	/* Still fixed until step 4 (DHT11). */
+	int16_t  temp = 2345;  /* 23.45 °C  (°C x 100) */
+	uint16_t hum  = 5500;  /* 55.00 %RH (%RH x 100) */
+
+	/* Flags byte: one bit per alarm. "1 << n" is a number with only bit n set. */
+	uint8_t flags = 0;
+	if (crush_alarm) {
+		flags |= 1 << 0;   /* bit0: crush alarm */
+	}
+	if (water < WATER_LOW_LIMIT) {
+		flags |= 1 << 1;   /* bit1: low water */
+	}
+	/* bit2 (sensor read failed): step 4 */
 
 	frame[0] = FRAME_VERSION;                    /* offset 0: version   */
 	sys_put_le16(seq, &frame[1]);                /* offset 1: seq       */
 	sys_put_le32(k_uptime_get_32(), &frame[3]);  /* offset 3: timestamp (ms since boot) */
 	sys_put_le16((uint16_t)temp, &frame[7]);     /* offset 7: temp (signed, same bits) */
 	sys_put_le16(hum, &frame[9]);                /* offset 9: hum       */
-	sys_put_le16(water, &frame[11]);             /* offset 11: water    */
-	frame[13] = posture;                         /* offset 13: posture  */
+	sys_put_le16((uint16_t)water, &frame[11]);   /* offset 11: water    */
+	frame[13] = lying ? 1 : 0;                   /* offset 13: posture  */
 	frame[14] = flags;                           /* offset 14: flags    */
 }
 
@@ -186,7 +294,7 @@ static void print_frame(const uint8_t frame[FRAME_LEN])
 
 
 /* ------------------------------------------------------------------------
- * 5. main: init + loop every 2 s
+ * 6. main: init + loop every 2 s
  * ------------------------------------------------------------------------ */
 
 int main(void)
@@ -203,6 +311,13 @@ int main(void)
 		return 0;
 	}
 
+	/* Registers button_changed() and enables the button interrupts. */
+	err = dk_buttons_init(button_changed);
+	if (err) {
+		printk("Buttons init failed (err %d)\n", err);
+		return 0;
+	}
+
 	err = bt_enable(NULL);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
@@ -215,6 +330,9 @@ int main(void)
 
 	for (;;) {
 		dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
+
+		/* The simulation runs always, even with no phone connected. */
+		update_water();
 
 		if (notify_enabled) {
 			build_frame(frame);

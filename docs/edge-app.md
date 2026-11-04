@@ -202,8 +202,11 @@ For `BleSource` to find and read the board, the firmware **must**:
   means a frame lost on the BLE link.
 - What `temp`/`hum` values are sent when the DHT11 read fails (the app ignores them
   when bit2 is set, so any value works)?
-- The crush window "lying + scream within N s": N is still TODO in the firmware.
-- Low-water threshold used by the firmware for bit1.
+- ~~Crush window N~~ **Decided 4 Nov:** a scream counts up to 30 s after lying
+  down; the alarm clears when the sow stands up (Button 1).
+- ~~Low-water threshold~~ **Decided 4 Nov:** bit1 is set when water < 200 mL/min
+  (simulated base 400 ± 15 mL/min, Button 3 starts a drop of 20 mL/min every 2 s).
+  Demo values, not real measurements.
 
 ## 8. Setup, run, test
 

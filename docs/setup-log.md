@@ -160,3 +160,59 @@ Todo en la carpeta personal (sin sudo), excepto Java:
   y `toStringAsFixed(1)` redondea hacia abajo. No es un error de la trama.
 - Evidencias en `docs/evidence/`: `2026-11-04_step2_board_uart.log`,
   `2026-11-04_step2_app_logcat.log`, `2026-11-04_step2_app_connected.png`.
+
+### 12. Firmware paso 3: simulación con los botones
+Objetivo: que la placa simule lo que en el diseño harían el acelerómetro, el
+micrófono y el caudalímetro (lo permite el profesor). Temperatura y humedad siguen
+fijas hasta el paso 4 (DHT11).
+
+| Botón / LED | Qué hace | En el diseño sería |
+|---|---|---|
+| Botón 1 | Cerda de pie ↔ tumbada (`posture`) | acelerómetro |
+| Botón 2 | Chillido de lechón | micrófono |
+| Botón 3 | Empieza / para una bajada de agua | caudalímetro |
+| Botón 4 | Libre (paso 4: simular fallo del DHT11) | — |
+| LED1 | Móvil conectado | — |
+| LED2 | Alarma de aplastamiento | — |
+| LED3 | Cerda tumbada | — |
+| LED4 | Parpadea: el programa funciona | — |
+
+Parámetros de simulación (decididos 04/11; valores de demo, **no medidas reales**):
+- Ventana del chillido: **30 s** después de tumbarse. Imita el diseño, donde el
+  micrófono solo escucha un rato después de que el acelerómetro detecte que se tumba.
+- La alarma se apaga cuando la cerda **se levanta** (el granjero ha ido a mirar).
+- Agua: base **400 mL/min** ± 15 de ruido aleatorio; con la bajada activa pierde
+  **20 mL/min cada 2 s**; por debajo de **200 mL/min** → `flags bit1` (poca agua).
+
+Cómo funciona el código (nueva sección 4 de `main.c`):
+- **Interrupciones**: `dk_buttons_init(button_changed)` configura los pines de los
+  botones con interrupción GPIO. Al pulsar, el procesador salta a una rutina de la
+  librería de Nordic, que programa un pequeño "escaneo" en la *system workqueue*
+  (un hilo del sistema). Ese escaneo quita los rebotes del contacto y llama a
+  **nuestra** función `button_changed()`. Por tanto, nuestro código no corre dentro
+  de la interrupción, sino en un hilo normal (por eso podemos usar `printk`).
+  Ventaja frente a mirar los botones en un bucle (*polling*): el procesador no
+  gasta tiempo preguntando y la reacción es inmediata.
+- `button_changed()` recibe dos máscaras de bits: qué botones están pulsados y
+  cuáles han cambiado. `pressed = button_state & has_changed` → solo los recién pulsados.
+- `update_water()` se llama cada 2 s desde el bucle, haya móvil o no.
+- `build_frame()` calcula `flags` con `|=` y `1 << n` (poner a 1 el bit n).
+- Las variables de estado (`lying`, `crush_alarm`…) las escribe el hilo de los
+  botones y las lee el bucle principal. No hace falta un *mutex*: son variables
+  simples de 32 bits o menos, y el Cortex-M4 las lee/escribe de una sola vez.
+- FLASH 138344 B (13,2 %), RAM 23668 B (9,0 %).
+
+### 13. Prueba del paso 3 con la app ✔
+- 240 tramas seguidas en ~8 min (seq 0 → 239): **0 perdidas**.
+- Tumbada + chillido dentro de la ventana → `CRUSH ALARM` (a 15,5 s y 16,0 s) →
+  banner rojo en la app. Levantarse → alarma borrada.
+- Chillido con la cerda de pie, o con más de 30 s tumbada → `Scream ignored`.
+- Bajada de agua → por debajo de 200 mL/min sale `lowWater` y el banner ámbar.
+  En las 240 tramas, el bit `lowWater` coincide siempre con `agua < 200`.
+- Extra: al reflashear, `seq` volvió a 0 con la app conectada. El contador de la app
+  lo trató como reinicio de la placa (no como pérdida): por eso "Packets received"
+  (589) es mayor que "Last seq" (147) y las pérdidas siguen a 0.
+- Evidencias: `2026-11-04_step3_board_uart.log`, `2026-11-04_step3_app_logcat.log`,
+  `2026-11-04_step3_app_crush_alarm.jpg`, `2026-11-04_step3_app_low_water.jpg`,
+  `2026-11-04_step3_app_normal.jpg`, `2026-11-04_step3_board_leds_alarm.jpg` (foto de la
+  placa en alarma: LED1 conectado, LED2 alarma, LED3 tumbada; LED4 parpadea).
