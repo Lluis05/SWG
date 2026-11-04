@@ -48,8 +48,13 @@ class SensorReading {
 abstract class ReadingSource {      // two implementations:
   Stream<SensorReading> get readings; // - MockSource: fake readings in the app
   Stream<bool> get connected;         // - BleSource: real data from the node
+  Future<void> start();               // start the timer / scan + connect
+  Future<void> stop();                // stop and free resources (not reusable)
 }
 ```
+
+> Change 4 Nov 2026: `start()` and `stop()` added so the UI can switch between
+> `MockSource` and `BleSource` at runtime. Pending agreement of the three members.
 
 ## 2. Edge → Cloud
 
