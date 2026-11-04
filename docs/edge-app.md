@@ -197,8 +197,9 @@ For `BleSource` to find and read the board, the firmware **must**:
       filter by name, only by UUID.
 
 **Open points to agree (TODO, not decided):**
-- Does `seq` keep incrementing while no phone is connected? This changes how
-  "lost" packets after a reconnection should be read in the report.
+- ~~Does `seq` keep incrementing while no phone is connected?~~ **Decided 4 Nov:**
+  no. The firmware only increments `seq` after a frame is really sent, so a gap
+  means a frame lost on the BLE link.
 - What `temp`/`hum` values are sent when the DHT11 read fails (the app ignores them
   when bit2 is set, so any value works)?
 - The crush window "lying + scream within N s": N is still TODO in the firmware.

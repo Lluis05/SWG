@@ -44,9 +44,10 @@ docs/       protocol.md, edge-app.md (how the Flutter app works), test evidence 
 - Required report structure: see `docs/course/IoT-lab-guide.md` (includes per-layer testing, end-to-end testing and test evidence — keep logs/screenshots in `docs/evidence/`).
 
 ## Current status (4 Nov 2026)
-- **Edge app (`app/`)**: done and running on a real phone with `MockSource`. `BleSource` is written but not tested against the board yet. Full explanation (architecture, every file, BLE sequence, reconnection, integration checklist for the firmware, open points): **read `docs/edge-app.md` before touching the app or the firmware's BLE side.**
-- **Firmware (`firmware/`)**: still the unmodified Nordic `peripheral_lbs` sample (see `docs/setup-log.md`). To work with the app it must follow the checklist in `docs/edge-app.md` §7 (our service UUID advertised, notify characteristic, no security, 15-byte frame every 2 s).
-- **Dart interface change**: `ReadingSource` now also has `start()` and `stop()` (recorded in `docs/protocol.md`, pending agreement of the three members).
+- **Edge app (`app/`)**: done. Tested end to end with the real board on 4 Nov (Xiaomi phone, 0 % loss). Full explanation (architecture, every file, BLE sequence, reconnection, integration checklist for the firmware, open points): **read `docs/edge-app.md` before touching the app or the firmware's BLE side.**
+- **Firmware (`firmware/`)**: step 2 done (branch `lluis/firmware-step2`): own GATT service + UUID advertised, no security, 15-byte frame every 2 s with FIXED test values, `seq` only increments on a successful send. Next: step 3 simulation (buttons with interrupts, water, alarm logic, flags, LEDs), step 4 DHT11. Step log in Spanish: `docs/setup-log.md`.
+- **Dart interface change**: `ReadingSource` now also has `start()` and `stop()` (recorded in `docs/protocol.md`; accepted by Lluís on 4 Nov).
+- **Flutter on Lluís's PC**: `~/development/flutter` (3.47.9), Android SDK `~/Android/Sdk`, JDK 17. His Xiaomi blocks `adb install`/`flutter run` (no SIM for "Install via USB"): build the APK, `adb push` it to `/sdcard/Download/` and install it by hand on the phone (see `docs/setup-log.md` §10).
 - **Cloud (`cloud/`)**: not started (Report 2).
 
 ## Commands

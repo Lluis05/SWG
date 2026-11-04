@@ -1,18 +1,19 @@
 /*
- * Copyright (c) 2018 Nordic Semiconductor ASA
+ * SowGuard node firmware — nRF52840-DK
  *
- * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ * Based on Nordic's peripheral_lbs sample (LicenseRef-Nordic-5-Clause).
+ *
+ * The board is a BLE peripheral. It advertises our service, and once a phone
+ * connects and enables notifications, it sends one 15-byte frame every 2 s.
+ * Frame layout: docs/protocol.md (version 1).
+ *
+ * Step 2: the frame carries FIXED test values. Buttons, simulation and the
+ * DHT11 come in the next steps.
  */
 
-#include <zephyr/types.h>
-#include <stddef.h>
-#include <string.h>
-#include <errno.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/byteorder.h>
-#include <zephyr/kernel.h>
-#include <zephyr/drivers/gpio.h>
-#include <soc.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
@@ -20,45 +21,87 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
 
-#include <bluetooth/services/lbs.h>
-
-#include <zephyr/settings/settings.h>
-
 #include <dk_buttons_and_leds.h>
 
-#define DEVICE_NAME             CONFIG_BT_DEVICE_NAME
-#define DEVICE_NAME_LEN         (sizeof(DEVICE_NAME) - 1)
+#define DEVICE_NAME      CONFIG_BT_DEVICE_NAME
+#define DEVICE_NAME_LEN  (sizeof(DEVICE_NAME) - 1)
+
+#define RUN_STATUS_LED   DK_LED1   /* blinks: the program is running */
+#define CON_STATUS_LED   DK_LED2   /* on: a phone is connected */
+
+#define SEND_PERIOD_MS   2000      /* one frame every 2 s (protocol.md) */
+#define FRAME_LEN        15        /* bytes per frame (protocol.md) */
+#define FRAME_VERSION    1
 
 
-#define RUN_STATUS_LED          DK_LED1
-#define CON_STATUS_LED          DK_LED2
-#define RUN_LED_BLINK_INTERVAL  1000
+/* ------------------------------------------------------------------------
+ * 1. UUIDs and GATT service
+ * ------------------------------------------------------------------------ */
 
-#define USER_LED                DK_LED3
+/* UUIDs from docs/protocol.md:
+ *   service 5781a4a8-0001-41a3-b91f-baa566bff75f
+ *   data    5781a4a8-0002-41a3-b91f-baa566bff75f
+ * BT_UUID_128_ENCODE takes the 5 groups of the UUID written as numbers. */
+#define SOWGUARD_SERVICE_UUID_VAL \
+	BT_UUID_128_ENCODE(0x5781a4a8, 0x0001, 0x41a3, 0xb91f, 0xbaa566bff75f)
+#define SOWGUARD_DATA_UUID_VAL \
+	BT_UUID_128_ENCODE(0x5781a4a8, 0x0002, 0x41a3, 0xb91f, 0xbaa566bff75f)
 
-#define USER_BUTTON             DK_BTN1_MSK
+static struct bt_uuid_128 service_uuid = BT_UUID_INIT_128(SOWGUARD_SERVICE_UUID_VAL);
+static struct bt_uuid_128 data_uuid = BT_UUID_INIT_128(SOWGUARD_DATA_UUID_VAL);
 
-static bool app_button_state;
-static struct k_work adv_work;
+/* true when the phone has enabled notifications (wrote 0x0001 to the CCCD). */
+static bool notify_enabled;
 
+/* Called by the BLE stack when the phone writes the CCCD. */
+static void ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+	notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+	printk("Notifications %s\n", notify_enabled ? "enabled" : "disabled");
+}
+
+/* Our GATT service. The stack builds this table of "attributes":
+ *   attrs[0] service declaration       (our service UUID)
+ *   attrs[1] characteristic declaration (properties: Notify)
+ *   attrs[2] characteristic value       (the 15-byte frame)
+ *   attrs[3] CCCD                       (the phone writes 0x0001 here)
+ * No read/write callbacks: the value is only sent by notification.
+ * BT_GATT_PERM_NONE + no pairing = no security, as decided on 28 Oct. */
+BT_GATT_SERVICE_DEFINE(sowguard_svc,
+	BT_GATT_PRIMARY_SERVICE(&service_uuid),
+	BT_GATT_CHARACTERISTIC(&data_uuid.uuid, BT_GATT_CHRC_NOTIFY,
+			       BT_GATT_PERM_NONE, NULL, NULL, NULL),
+	BT_GATT_CCC(ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+);
+
+
+/* ------------------------------------------------------------------------
+ * 2. Advertising
+ * ------------------------------------------------------------------------ */
+
+/* Advertising packet (max 31 bytes): flags (3 B) + our service UUID (18 B).
+ * The app scans with a filter on this UUID, so it MUST be here. */
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, SOWGUARD_SERVICE_UUID_VAL),
+};
+
+/* Scan response (sent when the phone asks for more): the device name. */
+static const struct bt_data sd[] = {
 	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
 };
 
-static const struct bt_data sd[] = {
-	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_LBS_VAL),
-};
+static struct k_work adv_work;
 
+/* Runs in the system work queue (not inside a BLE callback). */
 static void adv_work_handler(struct k_work *work)
 {
-	int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_2, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-
+	int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_2, ad, ARRAY_SIZE(ad),
+				  sd, ARRAY_SIZE(sd));
 	if (err) {
 		printk("Advertising failed to start (err %d)\n", err);
 		return;
 	}
-
 	printk("Advertising successfully started\n");
 }
 
@@ -67,152 +110,92 @@ static void advertising_start(void)
 	k_work_submit(&adv_work);
 }
 
+
+/* ------------------------------------------------------------------------
+ * 3. Connection events
+ * ------------------------------------------------------------------------ */
+
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
 		printk("Connection failed, err 0x%02x %s\n", err, bt_hci_err_to_str(err));
 		return;
 	}
-
 	printk("Connected\n");
-
 	dk_set_led_on(CON_STATUS_LED);
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	printk("Disconnected, reason 0x%02x %s\n", reason, bt_hci_err_to_str(reason));
-
+	notify_enabled = false; /* the next phone must subscribe again */
 	dk_set_led_off(CON_STATUS_LED);
 }
 
+/* The connection object is free again: start advertising so the phone can reconnect. */
 static void recycled_cb(void)
 {
-	printk("Connection object available from previous conn. Disconnect is complete!\n");
 	advertising_start();
 }
 
-#ifdef CONFIG_BT_LBS_SECURITY_ENABLED
-static void security_changed(struct bt_conn *conn, bt_security_t level,
-			     enum bt_security_err err)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	if (!err) {
-		printk("Security changed: %s level %u\n", addr, level);
-	} else {
-		printk("Security failed: %s level %u err %d %s\n", addr, level, err,
-		       bt_security_err_to_str(err));
-	}
-}
-#endif
-
 BT_CONN_CB_DEFINE(conn_callbacks) = {
-	.connected        = connected,
-	.disconnected     = disconnected,
-	.recycled         = recycled_cb,
-#ifdef CONFIG_BT_LBS_SECURITY_ENABLED
-	.security_changed = security_changed,
-#endif
+	.connected    = connected,
+	.disconnected = disconnected,
+	.recycled     = recycled_cb,
 };
 
-#if defined(CONFIG_BT_LBS_SECURITY_ENABLED)
-static void auth_passkey_display(struct bt_conn *conn, unsigned int passkey)
+
+/* ------------------------------------------------------------------------
+ * 4. Data frame (docs/protocol.md, version 1, little-endian)
+ * ------------------------------------------------------------------------ */
+
+/* Sequence number. It only goes up when a frame is really sent,
+ * so a gap seen by the app means a frame lost on the BLE link (decided 4 Nov). */
+static uint16_t seq;
+
+/* Fills the 15 bytes of the frame.
+ * sys_put_le16/32 write a number byte by byte, least significant byte first. */
+static void build_frame(uint8_t frame[FRAME_LEN])
 {
-	char addr[BT_ADDR_LE_STR_LEN];
+	/* Step 2: fixed test values (same as the first test of the app's decoder). */
+	int16_t  temp    = 2345;  /* 23.45 °C  (°C x 100) */
+	uint16_t hum     = 5500;  /* 55.00 %RH (%RH x 100) */
+	uint16_t water   = 350;   /* mL/min */
+	uint8_t  posture = 0;     /* 0 = standing, 1 = lying */
+	uint8_t  flags   = 0;     /* bit0 crush, bit1 low water, bit2 sensor error */
 
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	printk("Passkey for %s: %06u\n", addr, passkey);
+	frame[0] = FRAME_VERSION;                    /* offset 0: version   */
+	sys_put_le16(seq, &frame[1]);                /* offset 1: seq       */
+	sys_put_le32(k_uptime_get_32(), &frame[3]);  /* offset 3: timestamp (ms since boot) */
+	sys_put_le16((uint16_t)temp, &frame[7]);     /* offset 7: temp (signed, same bits) */
+	sys_put_le16(hum, &frame[9]);                /* offset 9: hum       */
+	sys_put_le16(water, &frame[11]);             /* offset 11: water    */
+	frame[13] = posture;                         /* offset 13: posture  */
+	frame[14] = flags;                           /* offset 14: flags    */
 }
 
-static void auth_cancel(struct bt_conn *conn)
+/* Prints the frame in hex on the UART log (test evidence). */
+static void print_frame(const uint8_t frame[FRAME_LEN])
 {
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	printk("Pairing cancelled: %s\n", addr);
-}
-
-static void pairing_complete(struct bt_conn *conn, bool bonded)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	printk("Pairing completed: %s, bonded: %d\n", addr, bonded);
-}
-
-static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	printk("Pairing failed conn: %s, reason %d %s\n", addr, reason,
-	       bt_security_err_to_str(reason));
-}
-
-static struct bt_conn_auth_cb conn_auth_callbacks = {
-	.passkey_display = auth_passkey_display,
-	.cancel = auth_cancel,
-};
-
-static struct bt_conn_auth_info_cb conn_auth_info_callbacks = {
-	.pairing_complete = pairing_complete,
-	.pairing_failed = pairing_failed
-};
-#else
-static struct bt_conn_auth_cb conn_auth_callbacks;
-static struct bt_conn_auth_info_cb conn_auth_info_callbacks;
-#endif
-
-static void app_led_cb(bool led_state)
-{
-	dk_set_led(USER_LED, led_state);
-}
-
-static bool app_button_cb(void)
-{
-	return app_button_state;
-}
-
-static struct bt_lbs_cb lbs_callbacs = {
-	.led_cb    = app_led_cb,
-	.button_cb = app_button_cb,
-};
-
-static void button_changed(uint32_t button_state, uint32_t has_changed)
-{
-	if (has_changed & USER_BUTTON) {
-		uint32_t user_button_state = button_state & USER_BUTTON;
-
-		bt_lbs_send_button_state(user_button_state);
-		app_button_state = user_button_state ? true : false;
+	printk("Frame seq %u:", seq);
+	for (int i = 0; i < FRAME_LEN; i++) {
+		printk(" %02x", frame[i]);
 	}
+	printk("\n");
 }
 
-static int init_button(void)
-{
-	int err;
 
-	err = dk_buttons_init(button_changed);
-	if (err) {
-		printk("Cannot init buttons (err: %d)\n", err);
-	}
-
-	return err;
-}
+/* ------------------------------------------------------------------------
+ * 5. main: init + loop every 2 s
+ * ------------------------------------------------------------------------ */
 
 int main(void)
 {
+	uint8_t frame[FRAME_LEN];
 	int blink_status = 0;
 	int err;
 
-	printk("Starting Bluetooth Peripheral LBS sample\n");
+	printk("Starting SowGuard node\n");
 
 	err = dk_leds_init();
 	if (err) {
@@ -220,49 +203,33 @@ int main(void)
 		return 0;
 	}
 
-	err = init_button();
-	if (err) {
-		printk("Button init failed (err %d)\n", err);
-		return 0;
-	}
-
-	if (IS_ENABLED(CONFIG_BT_LBS_SECURITY_ENABLED)) {
-		err = bt_conn_auth_cb_register(&conn_auth_callbacks);
-		if (err) {
-			printk("Failed to register authorization callbacks.\n");
-			return 0;
-		}
-
-		err = bt_conn_auth_info_cb_register(&conn_auth_info_callbacks);
-		if (err) {
-			printk("Failed to register authorization info callbacks.\n");
-			return 0;
-		}
-	}
-
 	err = bt_enable(NULL);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
 		return 0;
 	}
-
 	printk("Bluetooth initialized\n");
-
-	if (IS_ENABLED(CONFIG_SETTINGS)) {
-		settings_load();
-	}
-
-	err = bt_lbs_init(&lbs_callbacs);
-	if (err) {
-		printk("Failed to init LBS (err:%d)\n", err);
-		return 0;
-	}
 
 	k_work_init(&adv_work, adv_work_handler);
 	advertising_start();
 
 	for (;;) {
 		dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
-		k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
+
+		if (notify_enabled) {
+			build_frame(frame);
+
+			/* NULL = send to every connected phone that enabled notifications.
+			 * attrs[2] is the characteristic value (see the table above). */
+			err = bt_gatt_notify(NULL, &sowguard_svc.attrs[2], frame, FRAME_LEN);
+			if (err) {
+				printk("Notify failed (err %d)\n", err);
+			} else {
+				print_frame(frame);
+				seq++; /* uint16: after 65535 it wraps to 0 */
+			}
+		}
+
+		k_sleep(K_MSEC(SEND_PERIOD_MS));
 	}
 }

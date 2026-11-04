@@ -75,3 +75,88 @@ Equipo de trabajo: PC con CachyOS (Arch Linux).
 - Nota: el código es el ejemplo de Nordic **sin modificar** (no lo hemos programado
   nosotros). Solo lo hemos copiado, compilado y flasheado. Nuestro firmware se
   escribirá a partir de él.
+
+## 04/11/2026
+
+### 7. Integrar la app de Pol en `main`
+- Pol subió la rama `pol/edge-app` (app Flutter completa + `docs/edge-app.md`).
+- Revisada: el decodificador lee la trama exactamente como dice `protocol.md`.
+- Merge a `main` como *fast-forward* (`main` no tenía commits nuevos, así que solo
+  se "adelanta" el puntero de `main`; no se crea commit de merge).
+- Aceptado el cambio de Pol en la interfaz Dart: `ReadingSource` tiene `start()` y
+  `stop()` para poder cambiar entre datos simulados y la placa en marcha.
+
+### 8. Firmware paso 2: nuestro servicio BLE (rama `lluis/firmware-step2`)
+Objetivo: que la placa deje de ser el ejemplo de Nordic y envíe **nuestra trama de
+15 bytes cada 2 s**, con valores fijos de prueba (aún sin botones ni sensor).
+
+Cambios:
+- **`Kconfig` borrado**: solo definía la opción de seguridad del ejemplo.
+- **`prj.conf`**: nombre `SowGuard`, fuera el servicio LBS. No activamos
+  `CONFIG_BT_SMP` (la parte de BLE que hace el emparejamiento) → **no hay passkey**.
+- **`src/main.c`** reescrito en 5 secciones:
+  1. **UUIDs + servicio GATT** (`BT_GATT_SERVICE_DEFINE`). Es una tabla de
+     "atributos" que el stack BLE registra solo al arrancar:
+     `attrs[0]` servicio, `attrs[1]` declaración de la característica (Notify),
+     `attrs[2]` valor (la trama), `attrs[3]` CCCD.
+     El **CCCD** es el "interruptor" de 2 bytes que el móvil pone a `0x0001` para
+     pedir notificaciones; cuando lo hace, se ejecuta `ccc_changed()` y ponemos
+     `notify_enabled = true`.
+  2. **Advertising**: el paquete de anuncio (máx. 31 B) lleva flags (3 B) + nuestro
+     UUID de servicio (18 B). Es obligatorio: la app escanea filtrando por ese UUID.
+     El nombre va en la *scan response* (paquete extra que el móvil pide).
+  3. **Conexión**: al conectar se enciende LED2; al desconectar se apaga y
+     `notify_enabled = false`. `recycled_cb` vuelve a anunciar para poder reconectar.
+  4. **Trama**: `build_frame()` rellena los 15 bytes con `sys_put_le16/32`, que
+     escriben el número **byte menos significativo primero** (little-endian).
+     `print_frame()` la imprime en hexadecimal por el puerto serie (evidencia).
+  5. **`main()`**: LEDs + Bluetooth + advertising y un bucle cada 2 s: LED1
+     parpadea y, **solo si el móvil está suscrito**, se envía la trama con
+     `bt_gatt_notify()`. Si el envío va bien, `seq++`.
+- **Decisión 04/11**: `seq` solo aumenta cuando la trama se envía de verdad. Así un
+  hueco en `seq` = trama perdida en el enlace BLE (no tiempo desconectado).
+- Valores fijos: 23,45 °C, 55 %, 350 mL/min, de pie, sin flags (los mismos que el
+  primer test del decodificador de la app).
+- Compilado con `west build -p always` (`-p` = *pristine*, desde cero, necesario
+  porque borramos `Kconfig`): FLASH 136168 B (13 %), RAM 23540 B (9 %).
+  Antes con LBS + seguridad: 193856 B / 30360 B.
+
+### 9. Instalar Flutter en este PC (para compilar la app nosotros)
+Todo en la carpeta personal (sin sudo), excepto Java:
+- **Flutter 3.47.9** (misma versión que Pol, Dart 3.13.7):
+  `git clone --depth 1 -b 3.47.9 https://github.com/flutter/flutter.git ~/development/flutter`
+- **Java 17**: `sudo pacman -S --needed jdk17-openjdk` (el proyecto Android pide Java 17).
+- **SDK de Android** (sin Android Studio): *command-line tools* de Google en
+  `~/Android/Sdk/cmdline-tools/latest`, licencias con `sdkmanager --licenses`, y
+  `sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"`.
+  Gradle descargó solo el NDK la primera vez.
+- Configuración: `flutter config --android-sdk ~/Android/Sdk` y
+  `flutter config --jdk-dir /usr/lib/jvm/java-17-openjdk`.
+- Licencias aceptadas: 8. La única que usamos es `android-sdk-license` (gratis,
+  solo para desarrollar apps Android, no se puede redistribuir el SDK). Las demás
+  son de componentes que no instalamos (Google TV, XR, Glass, MIPS, emulador ARM).
+- `flutter test` en `app/` → **13 tests pasan**.
+
+### 10. Instalar la app en el Xiaomi (sin SIM)
+- Xiaomi bloquea `adb install` (`INSTALL_FAILED_USER_RESTRICTED`) si no activas
+  "Instalar vía USB", y esa opción pide SIM.
+- Solución: compilar el APK y copiarlo al móvil para instalarlo a mano:
+  ```
+  flutter build apk --debug                      # desde app/
+  adb push build/app/outputs/flutter-apk/app-debug.apk /sdcard/Download/sowguard-debug.apk
+  ```
+  En el móvil: Archivos → Descargas → tocar el APK → permitir "apps desconocidas".
+- Ver los logs de la app desde el PC: `adb logcat -s flutter | grep "BLE:"`
+
+### 11. Primera prueba de extremo a extremo (placa → BLE → app) ✔
+- App en "Real board": encuentra el nodo por UUID, conecta sin código y activa
+  notificaciones (log de la placa: `Connected`, `Notifications enabled`).
+- 32 tramas recibidas, **0 perdidas (0,0 %)**, una cada ~2 s.
+- Comprobación byte a byte, trama `01 00 00 32 f8 10 00 29 09 7c 15 5e 01 00 00`:
+  `01` versión · `00 00` seq 0 · `32 f8 10 00` → `0x0010F832` = 1112114 ms ·
+  `29 09` → 2345 = 23,45 °C · `7c 15` → 5500 = 55 % · `5e 01` → 350 mL/min ·
+  `00` de pie · `00` sin flags. La app muestra lo mismo.
+- Detalle: la app enseña 23.4 °C y no 23.5: 23,45 en coma flotante es 23,4499…
+  y `toStringAsFixed(1)` redondea hacia abajo. No es un error de la trama.
+- Evidencias en `docs/evidence/`: `2026-11-04_step2_board_uart.log`,
+  `2026-11-04_step2_app_logcat.log`, `2026-11-04_step2_app_connected.png`.
