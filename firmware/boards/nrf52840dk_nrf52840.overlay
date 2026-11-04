@@ -1,0 +1,23 @@
+/*
+ * Devicetree overlay for the nRF52840-DK: adds the DHT11 (DFRobot DFR0067).
+ *
+ * A devicetree describes the hardware connected to the board. An "overlay"
+ * adds to (or changes) the board's default description without editing it.
+ * The build system uses this file automatically because its name matches
+ * the board (nrf52840dk_nrf52840).
+ */
+
+/ {
+	dht11: dht11 {
+		/* Zephyr's driver for the Aosong DHT family. Without the "dht22"
+		 * property the driver treats the sensor as a DHT11. */
+		compatible = "aosong,dht";
+
+		/* Data pin: P0.03 (Arduino header A0).
+		 * GPIO_ACTIVE_LOW: the DHT11 signals by pulling the line LOW.
+		 * GPIO_PULL_UP: keeps the line HIGH when nobody pulls it down
+		 * (the internal pull-up of the nRF52840; TODO: check if the
+		 * DFR0067 module already has its own). */
+		dio-gpios = <&gpio0 3 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	};
+};

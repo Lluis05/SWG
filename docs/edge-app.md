@@ -200,8 +200,12 @@ For `BleSource` to find and read the board, the firmware **must**:
 - ~~Does `seq` keep incrementing while no phone is connected?~~ **Decided 4 Nov:**
   no. The firmware only increments `seq` after a frame is really sent, so a gap
   means a frame lost on the BLE link.
-- What `temp`/`hum` values are sent when the DHT11 read fails (the app ignores them
-  when bit2 is set, so any value works)?
+- ~~What `temp`/`hum` values are sent when the DHT11 read fails?~~ **Decided 4 Nov:**
+  1–2 failed reads in a row → the last good values are repeated (no flag);
+  3 in a row → temp = hum = 0 with bit2 set. Bit2 is also set until the first
+  good read after boot.
+- Note: with the DHT11 the Zephyr driver gives whole numbers only, so `temp` and
+  `hum` are always multiples of 100 (e.g. 2400 = 24.00 °C).
 - ~~Crush window N~~ **Decided 4 Nov:** a scream counts up to 30 s after lying
   down; the alarm clears when the sow stands up (Button 1).
 - ~~Low-water threshold~~ **Decided 4 Nov:** bit1 is set when water < 200 mL/min

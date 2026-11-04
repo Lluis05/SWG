@@ -216,3 +216,63 @@ Cómo funciona el código (nueva sección 4 de `main.c`):
   `2026-11-04_step3_app_crush_alarm.jpg`, `2026-11-04_step3_app_low_water.jpg`,
   `2026-11-04_step3_app_normal.jpg`, `2026-11-04_step3_board_leds_alarm.jpg` (foto de la
   placa en alarma: LED1 conectado, LED2 alarma, LED3 tumbada; LED4 parpadea).
+
+### 14. Firmware paso 4: sensor real DHT11 (DFR0067)
+Cableado: señal → **P0.03** (A0 del conector Arduino), VCC → **VDD** (~3 V de la
+placa, no 5 V: los pines del nRF52840 no aguantan 5 V), GND → GND.
+No tenemos hoja de datos del DFR0067 (TODO si la encontramos).
+
+Cómo se hace en Zephyr:
+- **Devicetree overlay** `firmware/boards/nrf52840dk_nrf52840.overlay`: el
+  *devicetree* es la descripción del hardware conectado; el overlay le añade
+  "hay un DHT11 (`aosong,dht`) en P0.03". El build lo usa solo porque el nombre
+  coincide con la placa. `GPIO_ACTIVE_LOW` (el sensor habla bajando la línea) y
+  `GPIO_PULL_UP` (resistencia interna que mantiene la línea alta en reposo).
+- `prj.conf`: `CONFIG_SENSOR=y`. El driver `CONFIG_DHT` se activa solo al ver el overlay.
+- `main.c` §5 `read_dht()`, cada 2 s:
+  `sensor_sample_fetch()` hace la lectura (el driver baja el pin 18 ms como señal
+  de inicio y mide los pulsos de respuesta: 40 bits + checksum; ~22 ms en total) y
+  `sensor_channel_get()` devuelve temperatura y humedad como `val1 + val2/10⁶`.
+  Con el DHT11 el driver solo da **enteros** (24 °C, 64 %) → la app muestra 24.0.
+- **Botón 4** activa/desactiva un fallo simulado (para probar el flag bit2).
+
+### 15. Problema: lecturas fallidas del DHT11 y cómo lo resolvimos
+- Primera prueba: ~**27 %** de lecturas fallan (`-EIO` = checksum o tiempos mal)
+  con la placa solo anunciándose, y **56 %** con el móvil conectado.
+- Causa (hipótesis, no medida directamente): el driver mide pulsos de microsegundos
+  "a mano"; si el Bluetooth interrumpe en mitad de la lectura, los tiempos salen
+  mal. Bloquear interrupciones (`CONFIG_DHT_LOCK_IRQS`) se descartó: el proyecto
+  usa `CONFIG_ZERO_LATENCY_IRQS=y`, así que las interrupciones de radio de Nordic
+  no se pueden bloquear y además podríamos romper el BLE.
+- **Solución 1 (opción A)**: si falla 1 o 2 veces seguidas, se reenvía el
+  **último valor bueno**; solo con **3 fallos seguidos** (~6 s) se envía
+  temp = hum = 0 con `flags bit2`. Al arrancar el contador empieza "lleno" para
+  no enviar 0 °C como si fuera real antes de la primera lectura buena.
+- **Solución 2: intervalo de conexión más largo** (`prj.conf`). El intervalo de
+  conexión es cada cuánto hablan placa y móvil por radio estando conectados. Por
+  defecto la placa pedía 30-50 ms; ahora pide **400-500 ms** (enviamos una trama
+  cada 2 s, no hace falta más). El *supervision timeout* (tiempo sin paquetes para
+  dar la conexión por perdida) sube a 4 s porque BLE exige > 2 × intervalo.
+  El móvil decide al final: aceptó **480 ms** (se ve en el log
+  `Connection parameters: interval 480.00 ms`). Al conectar, Android usa primero
+  7,5 ms y 30 ms para descubrir servicios rápido; la placa pide el cambio a los 5 s.
+  Ventaja extra: menos eventos de radio = **menos consumo** (gestión de energía).
+
+| | Intervalo 30 ms | Intervalo 480 ms |
+|---|---|---|
+| Lecturas fallidas | 56 % | **23 %** (14 de 62) |
+| Máx. fallos seguidos | ≥ 3 a menudo | **2** |
+| Falsos "Sensor error" en la app | muchos | **0** |
+
+### 16. Pruebas del paso 4 ✔
+- **Sensor vivo**: soplando, la humedad subió de 56 % a **95 %** y la temperatura
+  de 24 a **26 °C**.
+- **Fallo simulado (Botón 4)**: tras 3 lecturas la app muestra "Sensor error".
+- **Reconexión**: RESET de la placa → la app detecta `LINK_SUPERVISION_TIMEOUT` y
+  se reconecta sola en **3,7 s** (reintenta cada 3 s).
+- Evidencias: `2026-11-04_step4_board_uart_interval30ms.log`,
+  `2026-11-04_step4_app_logcat_interval30ms.log` (fallos + reconexión),
+  `2026-11-04_step4_board_uart_interval480ms.log`,
+  `2026-11-04_step4_app_logcat_interval480ms.log` (con la solución),
+  `2026-11-04_step4_app_dht11_breath_95pct.jpg`,
+  `2026-11-04_step4_app_sensor_error_simulated.jpg`.

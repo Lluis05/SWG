@@ -7,15 +7,15 @@
  * connects and enables notifications, it sends one 15-byte frame every 2 s.
  * Frame layout: docs/protocol.md (version 1).
  *
- * Step 3: posture, piglet scream, crush alarm and water flow are SIMULATED
- * with the DK buttons. Temperature/humidity are still fixed values (the
- * DHT11 comes in step 4).
+ * Temperature and humidity are REAL (DHT11 on P0.03, see the overlay in
+ * boards/). Posture, piglet scream, crush alarm and water flow are SIMULATED
+ * with the DK buttons (allowed by the professor).
  *
  * Buttons (lab simulation of the design's sensors):
  *   Button 1  sow stands up / lies down   (design: accelerometer)
  *   Button 2  piglet scream               (design: microphone)
  *   Button 3  start / stop a water drop   (design: flow meter)
- *   Button 4  free (step 4: simulate a DHT11 failure)
+ *   Button 4  simulate a DHT11 failure on / off (to test the sensor-error flag)
  * LEDs:
  *   LED1 phone connected · LED2 crush alarm · LED3 sow lying · LED4 blinks (running)
  */
@@ -24,6 +24,7 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/random/random.h>
+#include <zephyr/drivers/sensor.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
@@ -44,6 +45,7 @@
 #define POSTURE_BUTTON   DK_BTN1_MSK
 #define SCREAM_BUTTON    DK_BTN2_MSK
 #define WATER_BUTTON     DK_BTN3_MSK
+#define SENSOR_FAIL_BUTTON DK_BTN4_MSK
 
 #define SEND_PERIOD_MS   2000      /* one frame every 2 s (protocol.md) */
 #define FRAME_LEN        15        /* bytes per frame (protocol.md) */
@@ -155,6 +157,15 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	dk_set_led_off(CON_STATUS_LED);
 }
 
+/* The phone accepted new connection parameters (see prj.conf).
+ * interval is in units of 1.25 ms, timeout in units of 10 ms. */
+static void le_param_updated(struct bt_conn *conn, uint16_t interval,
+			     uint16_t latency, uint16_t timeout)
+{
+	printk("Connection parameters: interval %u.%02u ms, latency %u, timeout %u ms\n",
+	       interval * 125 / 100, interval * 125 % 100, latency, timeout * 10);
+}
+
 /* The connection object is free again: start advertising so the phone can reconnect. */
 static void recycled_cb(void)
 {
@@ -165,6 +176,7 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected    = connected,
 	.disconnected = disconnected,
 	.recycled     = recycled_cb,
+	.le_param_updated = le_param_updated,
 };
 
 
@@ -179,6 +191,7 @@ static bool     lying;           /* true = sow lying down */
 static uint32_t lying_since_ms;  /* uptime when she lay down */
 static bool     crush_alarm;     /* lying + scream inside the window */
 static bool     water_dropping;  /* Button 3 started a water drop */
+static bool     simulate_sensor_fail; /* Button 4: pretend the DHT11 read fails */
 static int      water_base = WATER_BASE;  /* flow without noise, mL/min */
 static int      water;                    /* flow sent in the frame, mL/min */
 
@@ -227,6 +240,11 @@ static void button_changed(uint32_t button_state, uint32_t has_changed)
 		}
 		printk("Water drop %s\n", water_dropping ? "started" : "stopped");
 	}
+
+	if (pressed & SENSOR_FAIL_BUTTON) {
+		simulate_sensor_fail = !simulate_sensor_fail;
+		printk("Simulated DHT11 failure %s\n", simulate_sensor_fail ? "ON" : "OFF");
+	}
 }
 
 /* Called every 2 s: updates the simulated water flow. */
@@ -247,7 +265,86 @@ static void update_water(void)
 
 
 /* ------------------------------------------------------------------------
- * 5. Data frame (docs/protocol.md, version 1, little-endian)
+ * 5. Real sensor: DHT11 (temperature + humidity)
+ * ------------------------------------------------------------------------ */
+
+/* The DHT11 device declared in boards/nrf52840dk_nrf52840.overlay
+ * (node label "dht11"). DEVICE_DT_GET gives a pointer to its driver. */
+static const struct device *dht = DEVICE_DT_GET(DT_NODELABEL(dht11));
+
+/* Reads that fail one after another before we report a sensor error.
+ * Without locking interrupts, about 40 % of single reads fail (BLE interrupts
+ * break the DHT11 timing; measured 4 Nov), so one failure alone is not an error. */
+#define MAX_SENSOR_FAILS 3
+
+/* Last GOOD reading, already in the frame units. */
+static int16_t  temp_x100;     /* °C x 100 */
+static uint16_t hum_x100;      /* %RH x 100 */
+static bool     sensor_error = true;  /* flags bit2. true until the first good read */
+
+/* Failed reads in a row. Starts "full" so that, until the first good read,
+ * the frame says sensor error instead of sending 0 °C as if it were real. */
+static int      fails_in_a_row = MAX_SENSOR_FAILS;
+
+/* Statistics for the report (failure rate). */
+static uint32_t total_reads;
+static uint32_t total_fails;
+
+/* Called every 2 s. Reads the DHT11 (takes about 25 ms).
+ * - Read OK          -> new values, no error.
+ * - 1 or 2 fails     -> keep sending the last good values, no error.
+ * - 3 fails in a row -> temp = hum = 0 and bit2 set (sensor error).
+ * (Decided 4 Nov, option A.) */
+static void read_dht(void)
+{
+	struct sensor_value temp, hum;  /* value = val1 + val2 / 1 000 000 */
+	int err;
+
+	if (simulate_sensor_fail) {
+		err = -EIO; /* pretend it failed (Button 4) */
+	} else {
+		/* 1. Ask the sensor for a new measurement. */
+		err = sensor_sample_fetch(dht);
+	}
+
+	if (err == 0) {
+		/* 2. Get the two values out of the driver. */
+		sensor_channel_get(dht, SENSOR_CHAN_AMBIENT_TEMP, &temp);
+		sensor_channel_get(dht, SENSOR_CHAN_HUMIDITY, &hum);
+	}
+
+	total_reads++;
+
+	if (err) {
+		total_fails++;
+		if (fails_in_a_row < MAX_SENSOR_FAILS) {
+			fails_in_a_row++;
+		}
+		printk("DHT11 read failed (err %d), %d in a row, total %u/%u\n",
+		       err, fails_in_a_row, total_fails, total_reads);
+
+		if (fails_in_a_row >= MAX_SENSOR_FAILS) {
+			sensor_error = true;
+			temp_x100 = 0;
+			hum_x100 = 0;
+		}
+		/* else: keep the last good values and the error flag as they are */
+		return;
+	}
+
+	fails_in_a_row = 0;
+	sensor_error = false;
+	/* x100 for the frame. val2 is in millionths, so /10000 gives hundredths.
+	 * (With the DHT11 the driver gives whole numbers: val2 is always 0.) */
+	temp_x100 = (int16_t)(temp.val1 * 100 + temp.val2 / 10000);
+	hum_x100 = (uint16_t)(hum.val1 * 100 + hum.val2 / 10000);
+	printk("DHT11: %d.%02d C, %u.%02u %%RH\n", temp_x100 / 100, temp_x100 % 100,
+	       hum_x100 / 100, hum_x100 % 100);
+}
+
+
+/* ------------------------------------------------------------------------
+ * 6. Data frame (docs/protocol.md, version 1, little-endian)
  * ------------------------------------------------------------------------ */
 
 /* Sequence number. It only goes up when a frame is really sent,
@@ -258,10 +355,6 @@ static uint16_t seq;
  * sys_put_le16/32 write a number byte by byte, least significant byte first. */
 static void build_frame(uint8_t frame[FRAME_LEN])
 {
-	/* Still fixed until step 4 (DHT11). */
-	int16_t  temp = 2345;  /* 23.45 °C  (°C x 100) */
-	uint16_t hum  = 5500;  /* 55.00 %RH (%RH x 100) */
-
 	/* Flags byte: one bit per alarm. "1 << n" is a number with only bit n set. */
 	uint8_t flags = 0;
 	if (crush_alarm) {
@@ -270,13 +363,15 @@ static void build_frame(uint8_t frame[FRAME_LEN])
 	if (water < WATER_LOW_LIMIT) {
 		flags |= 1 << 1;   /* bit1: low water */
 	}
-	/* bit2 (sensor read failed): step 4 */
+	if (sensor_error) {
+		flags |= 1 << 2;   /* bit2: DHT11 read failed */
+	}
 
 	frame[0] = FRAME_VERSION;                    /* offset 0: version   */
 	sys_put_le16(seq, &frame[1]);                /* offset 1: seq       */
 	sys_put_le32(k_uptime_get_32(), &frame[3]);  /* offset 3: timestamp (ms since boot) */
-	sys_put_le16((uint16_t)temp, &frame[7]);     /* offset 7: temp (signed, same bits) */
-	sys_put_le16(hum, &frame[9]);                /* offset 9: hum       */
+	sys_put_le16((uint16_t)temp_x100, &frame[7]); /* offset 7: temp (signed, same bits) */
+	sys_put_le16(hum_x100, &frame[9]);            /* offset 9: hum       */
 	sys_put_le16((uint16_t)water, &frame[11]);   /* offset 11: water    */
 	frame[13] = lying ? 1 : 0;                   /* offset 13: posture  */
 	frame[14] = flags;                           /* offset 14: flags    */
@@ -294,7 +389,7 @@ static void print_frame(const uint8_t frame[FRAME_LEN])
 
 
 /* ------------------------------------------------------------------------
- * 6. main: init + loop every 2 s
+ * 7. main: init + loop every 2 s
  * ------------------------------------------------------------------------ */
 
 int main(void)
@@ -318,6 +413,12 @@ int main(void)
 		return 0;
 	}
 
+	/* If the driver could not start, we keep going: BLE still works and
+	 * every frame will carry the sensor-error flag. */
+	if (!device_is_ready(dht)) {
+		printk("DHT11 device not ready\n");
+	}
+
 	err = bt_enable(NULL);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
@@ -331,7 +432,8 @@ int main(void)
 	for (;;) {
 		dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
 
-		/* The simulation runs always, even with no phone connected. */
+		/* Sensor + simulation run always, even with no phone connected. */
+		read_dht();
 		update_water();
 
 		if (notify_enabled) {

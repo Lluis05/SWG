@@ -1,0 +1,216 @@
+*** Booting nRF Connect SDK v3.4.1-b20f8619ba9a ***
+*** Using Zephyr OS v4.4.2-33fa6a7aac6a ***
+Starting SowGuard node
+I: SoftDevice Controller build revision: 
+I: HW Platform: Nordic Semiconductor (0x0002)
+I: HW Variant: nRF52x (0x0002)
+I: Firmware: Standard Bluetooth controller (0x00) Version 180.4363 Build 1118343448
+I: HCI transport: SDC
+I: Identity: F0:09:D9:4C:E9:18 (random)
+I: HCI: version 6.3 (0x11) revision 0x1080, manufacturer 0x0059
+I: LMP: version 6.3 (0x11) subver 0x1080
+Bluetooth initialized
+Advertising successfully started
+Connected
+DHT11: 25.00 C, 57.00 %RH
+Connection parameters: interval 7.50 ms, latency 0, timeout 5000 ms
+Notifications enabled
+Connection parameters: interval 30.00 ms, latency 0, timeout 5000 ms
+*** Booting nRF Connect SDK v3.4.1-b20f8619ba9a ***
+*** Using Zephyr OS v4.4.2-33fa6a7aac6a ***
+Starting SowGuard node
+I: SoftDevice Controller build revision: 
+I: HW Platform: Nordic Semiconductor (0x0002)
+I: HW Variant: nRF52x (0x0002)
+I: Firmware: Standard Bluetooth controller (0x00) Version 180.4363 Build 1118343448
+I: HCI transport: SDC
+I: Identity: F0:09:D9:4C:E9:18 (random)
+I: HCI: version 6.3 (0x11) revision 0x1080, manufacturer 0x0059
+I: LMP: version 6.3 (0x11) subver 0x1080
+Bluetooth initialized
+Advertising successfully started
+DHT11 read failed (err -5), 3 in a row, total 1/1
+DHT11 read failed (err -5), 3 in a row, total 2/2
+DHT11 read failed (err -5), 3 in a row, total 3/3
+DHT11 read failed (err -5), 3 in a row, total 4/4
+Connected
+Connection parameters: interval 7.50 ms, latency 0, timeout 5000 ms
+Notifications enabled
+Connection parameters: interval 30.00 ms, latency 0, timeout 5000 ms
+DHT11 read failed (err -5), 3 in a row, total 5/5
+Frame seq 0: 01 00 00 fd 1f 00 00 00 00 00 00 9b 01 00 04
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 1: 01 01 00 ea 27 00 00 60 09 44 16 97 01 00 00
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 2: 01 02 00 d9 2f 00 00 60 09 44 16 94 01 00 00
+Connection parameters: interval 480.00 ms, latency 0, timeout 4000 ms
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 3: 01 03 00 c6 37 00 00 60 09 44 16 92 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 6/9
+Frame seq 4: 01 04 00 b4 3f 00 00 60 09 44 16 92 01 00 00
+DHT11 read failed (err -5), 2 in a row, total 7/10
+Frame seq 5: 01 05 00 a4 47 00 00 60 09 44 16 9c 01 00 00
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 6: 01 06 00 92 4f 00 00 60 09 44 16 97 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 8/12
+Frame seq 7: 01 07 00 80 57 00 00 60 09 44 16 94 01 00 00
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 8: 01 08 00 6e 5f 00 00 60 09 44 16 85 01 00 00
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 9: 01 09 00 5c 67 00 00 60 09 44 16 93 01 00 00
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 10: 01 0a 00 4a 6f 00 00 60 09 44 16 89 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 9/16
+Frame seq 11: 01 0b 00 3a 77 00 00 60 09 44 16 96 01 00 00
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 12: 01 0c 00 28 7f 00 00 60 09 44 16 9d 01 00 00
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 13: 01 0d 00 16 87 00 00 60 09 44 16 86 01 00 00
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 14: 01 0e 00 04 8f 00 00 60 09 44 16 9c 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 10/20
+Frame seq 15: 01 0f 00 f2 96 00 00 60 09 44 16 99 01 00 00
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 16: 01 10 00 e0 9e 00 00 60 09 44 16 85 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 17: 01 11 00 ce a6 00 00 60 09 a8 16 87 01 00 00
+DHT11: 24.00 C, 57.00 %RH
+Frame seq 18: 01 12 00 bc ae 00 00 60 09 44 16 90 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 19: 01 13 00 aa b6 00 00 60 09 a8 16 89 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 11/25
+Frame seq 20: 01 14 00 98 be 00 00 60 09 a8 16 97 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 21: 01 15 00 86 c6 00 00 60 09 a8 16 87 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 22: 01 16 00 74 ce 00 00 60 09 a8 16 95 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 23: 01 17 00 62 d6 00 00 60 09 a8 16 9a 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 12/29
+Frame seq 24: 01 18 00 52 de 00 00 60 09 a8 16 97 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 25: 01 19 00 40 e6 00 00 60 09 a8 16 8b 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 26: 01 1a 00 2e ee 00 00 60 09 a8 16 83 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 27: 01 1b 00 1c f6 00 00 60 09 a8 16 8c 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 28: 01 1c 00 0a fe 00 00 60 09 a8 16 94 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 29: 01 1d 00 f8 05 01 00 60 09 a8 16 91 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 30: 01 1e 00 e6 0d 01 00 60 09 a8 16 88 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 31: 01 1f 00 d4 15 01 00 60 09 a8 16 98 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 32: 01 20 00 c2 1d 01 00 60 09 a8 16 84 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 33: 01 21 00 b0 25 01 00 60 09 a8 16 87 01 00 00
+DHT11: 24.00 C, 58.00 %RH
+Frame seq 34: 01 22 00 9e 2d 01 00 60 09 a8 16 85 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 35: 01 23 00 8c 35 01 00 60 09 0c 17 83 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 36: 01 24 00 7a 3d 01 00 60 09 0c 17 95 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 37: 01 25 00 68 45 01 00 60 09 0c 17 86 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 38: 01 26 00 56 4d 01 00 60 09 0c 17 91 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 39: 01 27 00 44 55 01 00 60 09 0c 17 92 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 40: 01 28 00 32 5d 01 00 60 09 0c 17 99 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 41: 01 29 00 1f 65 01 00 60 09 0c 17 88 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 42: 01 2a 00 0d 6d 01 00 60 09 0c 17 8a 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 43: 01 2b 00 fb 74 01 00 60 09 0c 17 99 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 44: 01 2c 00 e9 7c 01 00 60 09 0c 17 83 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 13/50
+Frame seq 45: 01 2d 00 d9 84 01 00 60 09 0c 17 94 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 46: 01 2e 00 c7 8c 01 00 60 09 0c 17 92 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 14/52
+Frame seq 47: 01 2f 00 b8 94 01 00 60 09 0c 17 89 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 48: 01 30 00 a6 9c 01 00 60 09 0c 17 97 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 15/54
+Frame seq 49: 01 31 00 96 a4 01 00 60 09 0c 17 9f 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 50: 01 32 00 84 ac 01 00 60 09 0c 17 8a 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 16/56
+Frame seq 51: 01 33 00 74 b4 01 00 60 09 0c 17 9d 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 52: 01 34 00 62 bc 01 00 60 09 0c 17 90 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 53: 01 35 00 50 c4 01 00 60 09 0c 17 98 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 54: 01 36 00 3e cc 01 00 60 09 0c 17 88 01 00 00
+DHT11: 24.00 C, 59.00 %RH
+Frame seq 55: 01 37 00 2c d4 01 00 60 09 0c 17 91 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 17/61
+Frame seq 56: 01 38 00 1a dc 01 00 60 09 0c 17 93 01 00 00
+DHT11: 24.00 C, 95.00 %RH
+Frame seq 57: 01 39 00 08 e4 01 00 60 09 1c 25 95 01 00 00
+DHT11: 24.00 C, 95.00 %RH
+Frame seq 58: 01 3a 00 f6 eb 01 00 60 09 1c 25 90 01 00 00
+DHT11: 25.00 C, 95.00 %RH
+Frame seq 59: 01 3b 00 e4 f3 01 00 c4 09 1c 25 88 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 18/65
+Frame seq 60: 01 3c 00 d4 fb 01 00 c4 09 1c 25 9a 01 00 00
+DHT11: 25.00 C, 95.00 %RH
+Frame seq 61: 01 3d 00 c2 03 02 00 c4 09 1c 25 8c 01 00 00
+DHT11: 25.00 C, 95.00 %RH
+Frame seq 62: 01 3e 00 b0 0b 02 00 c4 09 1c 25 9c 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 19/68
+Frame seq 63: 01 3f 00 9f 13 02 00 c4 09 1c 25 99 01 00 00
+DHT11: 26.00 C, 95.00 %RH
+Frame seq 64: 01 40 00 8d 1b 02 00 28 0a 1c 25 95 01 00 00
+DHT11: 26.00 C, 95.00 %RH
+Frame seq 65: 01 41 00 7b 23 02 00 28 0a 1c 25 85 01 00 00
+DHT11: 26.00 C, 95.00 %RH
+Frame seq 66: 01 42 00 69 2b 02 00 28 0a 1c 25 9e 01 00 00
+DHT11: 26.00 C, 95.00 %RH
+Frame seq 67: 01 43 00 57 33 02 00 28 0a 1c 25 98 01 00 00
+DHT11: 26.00 C, 95.00 %RH
+Frame seq 68: 01 44 00 45 3b 02 00 28 0a 1c 25 8f 01 00 00
+DHT11: 27.00 C, 95.00 %RH
+Frame seq 69: 01 45 00 33 43 02 00 8c 0a 1c 25 86 01 00 00
+DHT11: 27.00 C, 95.00 %RH
+Frame seq 70: 01 46 00 21 4b 02 00 8c 0a 1c 25 8d 01 00 00
+DHT11: 27.00 C, 95.00 %RH
+Frame seq 71: 01 47 00 0f 53 02 00 8c 0a 1c 25 89 01 00 00
+DHT11: 27.00 C, 95.00 %RH
+Frame seq 72: 01 48 00 fd 5a 02 00 8c 0a 1c 25 9d 01 00 00
+DHT11: 27.00 C, 95.00 %RH
+Frame seq 73: 01 49 00 eb 62 02 00 8c 0a 1c 25 9e 01 00 00
+DHT11: 27.00 C, 95.00 %RH
+Frame seq 74: 01 4a 00 d9 6a 02 00 8c 0a 1c 25 8e 01 00 00
+DHT11: 27.00 C, 95.00 %RH
+Frame seq 75: 01 4b 00 c7 72 02 00 8c 0a 1c 25 98 01 00 00
+DHT11: 27.00 C, 95.00 %RH
+Frame seq 76: 01 4c 00 b5 7a 02 00 8c 0a 1c 25 9f 01 00 00
+DHT11: 27.00 C, 95.00 %RH
+Frame seq 77: 01 4d 00 a3 82 02 00 8c 0a 1c 25 96 01 00 00
+DHT11: 27.00 C, 95.00 %RH
+Frame seq 78: 01 4e 00 91 8a 02 00 8c 0a 1c 25 9d 01 00 00
+DHT11: 26.00 C, 95.00 %RH
+Frame seq 79: 01 4f 00 7f 92 02 00 28 0a 1c 25 98 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 20/85
+Frame seq 80: 01 50 00 6e 9a 02 00 28 0a 1c 25 93 01 00 00
+DHT11: 25.00 C, 95.00 %RH
+Frame seq 81: 01 51 00 5c a2 02 00 c4 09 1c 25 8f 01 00 00
+DHT11: 25.00 C, 91.00 %RH
+Frame seq 82: 01 52 00 4a aa 02 00 c4 09 8c 23 84 01 00 00
+DHT11: 25.00 C, 91.00 %RH
+Frame seq 83: 01 53 00 38 b2 02 00 c4 09 8c 23 9c 01 00 00
+DHT11: 26.00 C, 89.00 %RH
+Frame seq 84: 01 54 00 26 ba 02 00 28 0a c4 22 8d 01 00 00
+DHT11 read failed (err -5), 1 in a row, total 21/90
+Frame seq 85: 01 55 00 16 c2 02 00 28 0a c4 22 8a 01 00 00
+DHT11: 26.00 C, 79.00 %RH
+Frame seq 86: 01 56 00 04 ca 02 00 28 0a dc 1e 88 01 00 00
+DHT11: 26.00 C, 76.00 %RH
+Frame seq 87: 01 57 00 f2 d1 02 00 28 0a b0 1d 87 01 00 00
