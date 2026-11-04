@@ -26,7 +26,7 @@ Device → BLE → Edge (phone) → Internet → Cloud (backend + DB + web dashb
 firmware/   nRF52840 code
 app/        Flutter edge app
 cloud/      backend, DB config, web dashboard, ML
-docs/       protocol.md, test evidence (docs/evidence/), course PDFs + markdown versions (docs/course/)
+docs/       protocol.md, edge-app.md (how the Flutter app works), test evidence (docs/evidence/), course PDFs + markdown versions (docs/course/)
 ```
 
 ## Rules for Claude
@@ -43,5 +43,25 @@ docs/       protocol.md, test evidence (docs/evidence/), course PDFs + markdown 
 - Report 2 (backend + frontend + code zip/GitHub): 10/01/2027
 - Required report structure: see `docs/course/IoT-lab-guide.md` (includes per-layer testing, end-to-end testing and test evidence — keep logs/screenshots in `docs/evidence/`).
 
+## Current status (4 Nov 2026)
+- **Edge app (`app/`)**: done and running on a real phone with `MockSource`. `BleSource` is written but not tested against the board yet. Full explanation (architecture, every file, BLE sequence, reconnection, integration checklist for the firmware, open points): **read `docs/edge-app.md` before touching the app or the firmware's BLE side.**
+- **Firmware (`firmware/`)**: still the unmodified Nordic `peripheral_lbs` sample (see `docs/setup-log.md`). To work with the app it must follow the checklist in `docs/edge-app.md` §7 (our service UUID advertised, notify characteristic, no security, 15-byte frame every 2 s).
+- **Dart interface change**: `ReadingSource` now also has `start()` and `stop()` (recorded in `docs/protocol.md`, pending agreement of the three members).
+- **Cloud (`cloud/`)**: not started (Report 2).
+
 ## Commands
-TODO: build / flash / run commands for firmware, app and cloud once chosen.
+### App (run from `app/`)
+```
+flutter pub get    # after cloning
+flutter test       # unit tests (decoder + packet loss counter), no phone needed
+flutter run        # real Android phone by USB with USB debugging on (BLE does not work in the emulator)
+```
+### Firmware (run from `firmware/`, see `docs/setup-log.md`)
+```
+export ZEPHYR_BASE=$HOME/ncs/v3.4.1/zephyr
+nrfutil sdk-manager toolchain launch --ncs-version v3.4.1 -- west build -b nrf52840dk/nrf52840 -d build .
+nrfutil sdk-manager toolchain launch --ncs-version v3.4.1 -- west flash -d build --erase
+cat /dev/ttyACM0   # UART logs, 115200 baud
+```
+### Cloud
+TODO: technology not chosen yet.
