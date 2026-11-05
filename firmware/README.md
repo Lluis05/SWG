@@ -41,6 +41,9 @@ nrfutil device list
 From this folder (`firmware/`):
 
 ```bash
+# Tell west where Zephyr is (this repo is not inside the SDK folder). Once per terminal.
+export ZEPHYR_BASE=$HOME/ncs/v3.4.1/zephyr
+
 # Build (-p always = from scratch; use it the first time or after changing prj.conf/overlay)
 nrfutil sdk-manager toolchain launch --ncs-version v3.4.1 -- west build -p always -b nrf52840dk/nrf52840 -d build .
 
