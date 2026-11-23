@@ -276,3 +276,26 @@ Cómo se hace en Zephyr:
   `2026-11-04_step4_app_logcat_interval480ms.log` (con la solución),
   `2026-11-04_step4_app_dht11_breath_95pct.jpg`,
   `2026-11-04_step4_app_sensor_error_simulated.jpg`.
+
+### 17. Paso 5: agua y postura reales (23 nov, rama `lluis/firmware-vibration-water`)
+Compilado y flasheado desde el PC Windows (nRF Connect SDK v3.4.1 instalado con
+`nrfutil sdk-manager install v3.4.1`; J-Link V9.96a).
+- **Agua → SW-420 (sensor de vibración)** en P0.04, a 3,3 V. Una interrupción cuenta
+  los pulsos de DO; cada 2 s: `agua = media de pulsos de las últimas 3 ventanas × 5`,
+  máx. 600 mL/min. Quieto → 0 → `flags bit1`. Lab: proxy; Design: caudalímetro de pulsos.
+  El botón 3 ya no se usa.
+- Calibración (pulsos por ventana de 2 s): quieto **0**, golpecitos **17–80**,
+  agitando **200–405**. Con factor 10 los golpecitos ya llegaban al máximo y el
+  flag de poca agua parpadeaba → factor **5** y media de 3 ventanas (6 s).
+- **Postura → MPU-9250** por I2C (`i2c0` movido a SDA P1.04 / SCL P1.06 en el
+  overlay). Lectura directa de registros, sin driver de Zephyr (funciona también
+  con clones MPU-6500). `WHO_AM_I = 0x71` (MPU-9250 auténtico). Al arrancar guarda
+  la gravedad como "de pie"; si gira > 60° → tumbada. El botón 1 ya no se usa.
+- Prueba: inclinar el sensor → `lying` en < 2 s; botón 2 a los 5,0 s y 3,3 s →
+  CRUSH ALARM (`flags 03`); al ponerlo de pie → alarma borrada. Quieto, el ruido
+  es ±10 sobre 1024 (1 g): sin falsos cambios.
+- **DHT11 y vibración**: agitando el SW-420 hubo 3 fallos seguidos 3 veces (cientos
+  de interrupciones rompen el timing). Solución: se desactiva la interrupción de
+  vibración durante la lectura del DHT11 (~25 ms cada 2 s, se pierde ~1 % de pulsos).
+  **Pendiente de probar** con el sensor agitándose.
+- Intervalo de conexión confirmado: el Xiaomi acepta **480 ms** a los ~5 s de conectar.

@@ -20,4 +20,42 @@
 		 * DFR0067 module already has its own). */
 		dio-gpios = <&gpio0 3 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 	};
+
+	/* "zephyr,user" is a free node for pins our own code uses (no driver).
+	 * SW-420 vibration module, DO pin on P0.04 (Arduino header A1).
+	 * Module powered at 3.3 V: the nRF52840 pins do not accept 5 V.
+	 * GPIO_ACTIVE_HIGH: the code counts each change of DO to HIGH.
+	 * No pull resistor: the module already drives the line. */
+	zephyr,user {
+		vibration-gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+/* MPU-9250 accelerometer on I2C. The DK's default I2C pins are P0.26/P0.27;
+ * our wiring uses SDA = P1.04 and SCL = P1.06, so we give i2c0 new pins.
+ * "pinctrl" says which physical pin each signal of the peripheral uses:
+ * one set for normal use ("default") and one for low power ("sleep").
+ * The breakout already has pull-up resistors on SDA/SCL. Powered at 3.3 V. */
+&pinctrl {
+	i2c0_sowguard_default: i2c0_sowguard_default {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SDA, 1, 4)>,
+				<NRF_PSEL(TWIM_SCL, 1, 6)>;
+		};
+	};
+
+	i2c0_sowguard_sleep: i2c0_sowguard_sleep {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SDA, 1, 4)>,
+				<NRF_PSEL(TWIM_SCL, 1, 6)>;
+			low-power-enable;
+		};
+	};
+};
+
+&i2c0 {
+	status = "okay";
+	pinctrl-0 = <&i2c0_sowguard_default>;
+	pinctrl-1 = <&i2c0_sowguard_sleep>;
+	pinctrl-names = "default", "sleep";
 };

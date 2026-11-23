@@ -28,8 +28,8 @@ The nRF52840-DK is a BLE peripheral (GATT server). The phone is the central.
 | 3      | 4    | `timestamp` | uint32   | ms since boot |
 | 7      | 2    | `temp`      | int16    | °C × 100 (real, DHT11) |
 | 9      | 2    | `hum`       | uint16   | %RH × 100 (real, DHT11) |
-| 11     | 2    | `water`     | uint16   | mL/min (simulated) |
-| 13     | 1    | `posture`   | uint8    | 0 = standing, 1 = lying (simulated, Button 1) |
+| 11     | 2    | `water`     | uint16   | mL/min (real: SW-420 vibration pulses in the last 2 s × factor; Lab proxy of the Design's pulse flow meter) |
+| 13     | 1    | `posture`   | uint8    | 0 = standing, 1 = lying (real: MPU-9250 accelerometer, lying = tilt > 60° from the position at boot) |
 | 14     | 1    | `flags`     | uint8    | bit0 crush alarm, bit1 low water, bit2 sensor read failed |
 
 Total: 15 bytes.

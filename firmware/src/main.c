@@ -8,13 +8,16 @@
  * Frame layout: docs/protocol.md (version 1).
  *
  * Temperature and humidity are REAL (DHT11 on P0.03, see the overlay in
- * boards/). Posture, piglet scream, crush alarm and water flow are SIMULATED
- * with the DK buttons (allowed by the professor).
+ * boards/). Water flow is REAL too: pulses of an SW-420 vibration sensor on
+ * P0.04 (Lab proxy; the Design uses a pulse flow meter). Posture is REAL:
+ * tilt measured by an MPU-9250 accelerometer on I2C (SDA P1.04, SCL P1.06).
+ * Piglet scream and crush alarm are SIMULATED with the DK buttons (allowed by
+ * the professor).
  *
  * Buttons (lab simulation of the design's sensors):
- *   Button 1  sow stands up / lies down   (design: accelerometer)
+ *   Button 1  not used (was the simulated posture)
  *   Button 2  piglet scream               (design: microphone)
- *   Button 3  start / stop a water drop   (design: flow meter)
+ *   Button 3  not used (was the simulated water drop)
  *   Button 4  simulate a DHT11 failure on / off (to test the sensor-error flag)
  * LEDs:
  *   LED1 phone connected · LED2 crush alarm · LED3 sow lying · LED4 blinks (running)
@@ -23,8 +26,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/byteorder.h>
-#include <zephyr/random/random.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/i2c.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
@@ -42,9 +47,7 @@
 #define LYING_LED        DK_LED3   /* on: the sow is lying down */
 #define RUN_STATUS_LED   DK_LED4   /* blinks: the program is running */
 
-#define POSTURE_BUTTON   DK_BTN1_MSK
 #define SCREAM_BUTTON    DK_BTN2_MSK
-#define WATER_BUTTON     DK_BTN3_MSK
 #define SENSOR_FAIL_BUTTON DK_BTN4_MSK
 
 #define SEND_PERIOD_MS   2000      /* one frame every 2 s (protocol.md) */
@@ -53,10 +56,15 @@
 
 /* Simulation parameters (agreed 4 Nov). Demo values, NOT real measurements. */
 #define SCREAM_WINDOW_MS   30000   /* a scream counts only up to 30 s after lying down */
-#define WATER_BASE         400     /* normal flow, mL/min */
-#define WATER_NOISE        15      /* random +/- variation, mL/min */
-#define WATER_DROP_STEP    20      /* mL/min less every 2 s while dropping */
-#define WATER_LOW_LIMIT    200     /* below this -> low-water flag */
+
+/* Water flow from the vibration sensor (section 6).
+ * Calibrated 23 Nov with the UART log (pulses per 2 s window):
+ * still 0, tapping 17-80, shaking 200-405. With 5: tapping ~85-400 mL/min,
+ * shaking reaches the 600 limit. */
+#define WATER_ML_PER_PULSE 5       /* mL/min added by each pulse in a 2 s window */
+#define WATER_WINDOWS      3       /* average of the last 3 windows (6 s) */
+#define WATER_MAX          600     /* upper limit, mL/min */
+#define WATER_LOW_LIMIT    200     /* below this -> low-water flag (agreed 4 Nov) */
 
 
 /* ------------------------------------------------------------------------
@@ -181,19 +189,38 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 
 
 /* ------------------------------------------------------------------------
- * 4. Simulation: buttons, crush alarm and water flow
+ * 4. Sow state, crush alarm and buttons
  * ------------------------------------------------------------------------ */
 
-/* State of the simulated sow. Written by the button callback and read by the
- * main loop (both are normal threads; 32-bit reads/writes on this CPU are
- * done in one go, so no lock is needed for these simple variables). */
+/* State of the sow. "lying" is written by the main loop (accelerometer) and
+ * read by the button callback (scream). Both are normal threads; 32-bit
+ * reads/writes on this CPU are done in one go, so no lock is needed for these
+ * simple variables. */
 static bool     lying;           /* true = sow lying down */
 static uint32_t lying_since_ms;  /* uptime when she lay down */
 static bool     crush_alarm;     /* lying + scream inside the window */
-static bool     water_dropping;  /* Button 3 started a water drop */
 static bool     simulate_sensor_fail; /* Button 4: pretend the DHT11 read fails */
-static int      water_base = WATER_BASE;  /* flow without noise, mL/min */
-static int      water;                    /* flow sent in the frame, mL/min */
+
+/* Called when the accelerometer sees a change of posture. */
+static void set_lying(bool now_lying)
+{
+	if (now_lying == lying) {
+		return; /* no change */
+	}
+	if (now_lying) {
+		lying_since_ms = k_uptime_get_32(); /* set before "lying" (scream check) */
+		lying = true;
+		printk("Sow lying down: listening for screams for %d s\n",
+		       SCREAM_WINDOW_MS / 1000);
+	} else {
+		lying = false;
+		/* Standing up clears the alarm (the farmer has checked the crate). */
+		crush_alarm = false;
+		printk("Sow standing up, alarm cleared\n");
+	}
+	dk_set_led(LYING_LED, lying);
+	dk_set_led(ALARM_LED, crush_alarm);
+}
 
 /* Called by Nordic's DK library when any button changes.
  * How it works: pressing a button causes a GPIO INTERRUPT; the library then
@@ -205,21 +232,6 @@ static void button_changed(uint32_t button_state, uint32_t has_changed)
 {
 	/* We only react when a button is PRESSED (changed AND now pressed). */
 	uint32_t pressed = button_state & has_changed;
-
-	if (pressed & POSTURE_BUTTON) {
-		lying = !lying;
-		if (lying) {
-			lying_since_ms = k_uptime_get_32();
-			printk("Sow lying down: listening for screams for %d s\n",
-			       SCREAM_WINDOW_MS / 1000);
-		} else {
-			/* Standing up clears the alarm (the farmer has checked the crate). */
-			crush_alarm = false;
-			printk("Sow standing up, alarm cleared\n");
-		}
-		dk_set_led(LYING_LED, lying);
-		dk_set_led(ALARM_LED, crush_alarm);
-	}
 
 	if (pressed & SCREAM_BUTTON) {
 		uint32_t since_lying_ms = k_uptime_get_32() - lying_since_ms;
@@ -233,39 +245,196 @@ static void button_changed(uint32_t button_state, uint32_t has_changed)
 		}
 	}
 
-	if (pressed & WATER_BUTTON) {
-		water_dropping = !water_dropping;
-		if (!water_dropping) {
-			water_base = WATER_BASE; /* back to normal at once */
-		}
-		printk("Water drop %s\n", water_dropping ? "started" : "stopped");
-	}
-
 	if (pressed & SENSOR_FAIL_BUTTON) {
 		simulate_sensor_fail = !simulate_sensor_fail;
 		printk("Simulated DHT11 failure %s\n", simulate_sensor_fail ? "ON" : "OFF");
 	}
 }
 
-/* Called every 2 s: updates the simulated water flow. */
-static void update_water(void)
+
+/* ------------------------------------------------------------------------
+ * 5. Real sensor: MPU-9250 accelerometer -> posture (standing / lying)
+ * ------------------------------------------------------------------------ */
+
+/* We talk to the chip directly over I2C (a few registers) instead of using
+ * Zephyr's mpu9250 driver: many "MPU-9250" boards really carry an MPU-6500,
+ * which that driver rejects, while these registers are the same on both.
+ * Bus: i2c0 moved to SDA P1.04 / SCL P1.06 in the overlay.
+ *
+ * Idea: the accelerometer always measures gravity (1 g, pointing down).
+ * At boot we save that direction as "standing" (so the sensor must be in its
+ * standing position when the board starts). Later, if the direction of
+ * gravity turns more than 60 degrees away from it, the sow is lying down. */
+#define MPU_ADDR             0x68  /* AD0 pin low (default on the breakout) */
+#define MPU_REG_PWR_MGMT_1   0x6B  /* write 0 to wake the chip up (it starts asleep) */
+#define MPU_REG_ACCEL_XOUT_H 0x3B  /* X, Y, Z: 3 x int16, big-endian */
+#define MPU_REG_WHO_AM_I     0x75  /* chip id: 0x71 MPU-9250, 0x70 MPU-6500 */
+
+static const struct device *i2c = DEVICE_DT_GET(DT_NODELABEL(i2c0));
+static bool    accel_ok;              /* false -> posture stays "standing" */
+static int32_t ref_x, ref_y, ref_z;   /* gravity at boot = standing */
+
+/* Reads the 3 axes. Default range +-2 g: 16384 = 1 g. We divide by 16
+ * (1 g = 1024) so the products in update_posture() fit in 64 bits. */
+static int accel_read(int32_t *x, int32_t *y, int32_t *z)
 {
-	if (water_dropping && water_base >= WATER_DROP_STEP) {
-		water_base -= WATER_DROP_STEP;
+	uint8_t buf[6];
+	int err = i2c_burst_read(i2c, MPU_ADDR, MPU_REG_ACCEL_XOUT_H, buf, sizeof(buf));
+
+	if (err) {
+		return err;
+	}
+	*x = (int16_t)sys_get_be16(&buf[0]) / 16;
+	*y = (int16_t)sys_get_be16(&buf[2]) / 16;
+	*z = (int16_t)sys_get_be16(&buf[4]) / 16;
+	return 0;
+}
+
+/* Wakes the chip up and saves the "standing" reference. */
+static int accel_init(void)
+{
+	uint8_t who;
+	int err;
+
+	if (!device_is_ready(i2c)) {
+		return -ENODEV;
+	}
+	err = i2c_reg_read_byte(i2c, MPU_ADDR, MPU_REG_WHO_AM_I, &who);
+	if (err) {
+		return err; /* nobody answered at 0x68: check wiring / AD0 */
+	}
+	printk("Accelerometer WHO_AM_I = 0x%02x\n", who);
+
+	err = i2c_reg_write_byte(i2c, MPU_ADDR, MPU_REG_PWR_MGMT_1, 0x00);
+	if (err) {
+		return err;
+	}
+	k_msleep(100); /* let the first measurement finish */
+
+	err = accel_read(&ref_x, &ref_y, &ref_z);
+	if (err) {
+		return err;
+	}
+	printk("Standing reference: x %d, y %d, z %d (1 g = 1024)\n", ref_x, ref_y, ref_z);
+	return 0;
+}
+
+/* Called every 2 s: is gravity more than 60 degrees away from the reference?
+ * Angle between two vectors a and r:  cos(angle) = (a . r) / (|a| |r|).
+ * angle > 60  <=>  cos < 0.5  <=>  a.r <= 0  or  4 (a.r)^2 < |a|^2 |r|^2
+ * (squared to avoid square roots). */
+static void update_posture(void)
+{
+	int32_t x, y, z;
+
+	if (!accel_ok) {
+		return;
+	}
+	if (accel_read(&x, &y, &z)) {
+		printk("Accelerometer read failed, posture unchanged\n");
+		return;
 	}
 
-	/* Random number between -WATER_NOISE and +WATER_NOISE. */
-	int noise = (int)(sys_rand32_get() % (2 * WATER_NOISE + 1)) - WATER_NOISE;
+	int64_t dot = (int64_t)x * ref_x + (int64_t)y * ref_y + (int64_t)z * ref_z;
+	int64_t a2 = (int64_t)x * x + (int64_t)y * y + (int64_t)z * z;
+	int64_t r2 = (int64_t)ref_x * ref_x + (int64_t)ref_y * ref_y +
+		     (int64_t)ref_z * ref_z;
+	bool tilted = (dot <= 0) || (4 * dot * dot < a2 * r2);
 
-	water = water_base + noise;
-	if (water < 0) {
-		water = 0;
-	}
+	printk("Accel: x %d, y %d, z %d -> %s\n", x, y, z, tilted ? "lying" : "standing");
+	set_lying(tilted);
 }
 
 
 /* ------------------------------------------------------------------------
- * 5. Real sensor: DHT11 (temperature + humidity)
+ * 6. Real sensor: SW-420 vibration module -> water flow
+ * ------------------------------------------------------------------------ */
+
+/* The SW-420 has a small spring switch: while it vibrates, its DO pin goes
+ * up and down many times. We count those pulses, like a real pulse flow meter
+ * (Design) whose pulses are proportional to the flow:
+ *     water (mL/min) = average pulses per 2 s window x WATER_ML_PER_PULSE
+ * The average uses the last WATER_WINDOWS windows so the value (and the
+ * low-water flag) does not jump up and down with every tap.
+ * No vibration -> 0 mL/min -> low-water flag. Lab uses this as a proxy.
+ * Module powered at 3.3 V (VDD), DO on P0.04: see the overlay in boards/. */
+static const struct gpio_dt_spec vib =
+	GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), vibration_gpios);
+
+static struct gpio_callback vib_cb;  /* registration data for the interrupt */
+static atomic_t vib_pulses;          /* pulses since the last update_water() */
+static bool     vib_ok;              /* false -> sensor not set up, water stays 0 */
+static uint32_t last_pulses[WATER_WINDOWS]; /* pulses of the last windows */
+static int      next_window;         /* where the next window is stored */
+static int      water;               /* flow sent in the frame, mL/min */
+
+/* Runs in the INTERRUPT every time DO goes to its active level. Keep it tiny:
+ * only add 1. atomic_inc because the main loop reads and clears the counter. */
+static void vib_pulse(const struct device *port, struct gpio_callback *cb,
+		      uint32_t pins)
+{
+	atomic_inc(&vib_pulses);
+}
+
+/* Configures P0.04 as input with an interrupt on each pulse. */
+static int vibration_init(void)
+{
+	int err;
+
+	if (!gpio_is_ready_dt(&vib)) {
+		return -ENODEV;
+	}
+	err = gpio_pin_configure_dt(&vib, GPIO_INPUT);
+	if (err) {
+		return err;
+	}
+	err = gpio_pin_interrupt_configure_dt(&vib, GPIO_INT_EDGE_TO_ACTIVE);
+	if (err) {
+		return err;
+	}
+	gpio_init_callback(&vib_cb, vib_pulse, BIT(vib.pin));
+	return gpio_add_callback(vib.port, &vib_cb);
+}
+
+/* Turns the vibration interrupt off / on. Used around the DHT11 read: while
+ * shaking, hundreds of interrupts break the DHT11 timing (measured 23 Nov:
+ * 3 failures in a row only while shaking). The read takes ~25 ms of every
+ * 2 s, so we lose only ~1 % of the pulses. */
+static void vibration_pause(bool pause)
+{
+	if (vib_ok) {
+		gpio_pin_interrupt_configure_dt(&vib, pause ? GPIO_INT_DISABLE
+							    : GPIO_INT_EDGE_TO_ACTIVE);
+	}
+}
+
+/* Called every 2 s: turns the pulses of the last windows into a flow. */
+static void update_water(void)
+{
+	/* atomic_set returns the old value and leaves 0 for the next window. */
+	uint32_t pulses = (uint32_t)atomic_set(&vib_pulses, 0);
+	uint32_t sum = 0;
+
+	/* Save this window over the oldest one, then add all of them. */
+	last_pulses[next_window] = pulses;
+	next_window = (next_window + 1) % WATER_WINDOWS;
+	for (int i = 0; i < WATER_WINDOWS; i++) {
+		sum += last_pulses[i];
+	}
+
+	uint32_t flow = sum * WATER_ML_PER_PULSE / WATER_WINDOWS;
+
+	if (flow > WATER_MAX) {
+		flow = WATER_MAX;
+	}
+	water = (int)flow;
+	printk("Vibration: %u pulses (sum of last %d: %u) -> water %d mL/min\n",
+	       pulses, WATER_WINDOWS, sum, water);
+}
+
+
+/* ------------------------------------------------------------------------
+ * 7. Real sensor: DHT11 (temperature + humidity)
  * ------------------------------------------------------------------------ */
 
 /* The DHT11 device declared in boards/nrf52840dk_nrf52840.overlay
@@ -303,8 +472,11 @@ static void read_dht(void)
 	if (simulate_sensor_fail) {
 		err = -EIO; /* pretend it failed (Button 4) */
 	} else {
-		/* 1. Ask the sensor for a new measurement. */
+		/* 1. Ask the sensor for a new measurement (vibration interrupt
+		 *    paused meanwhile, see vibration_pause()). */
+		vibration_pause(true);
 		err = sensor_sample_fetch(dht);
+		vibration_pause(false);
 	}
 
 	if (err == 0) {
@@ -344,7 +516,7 @@ static void read_dht(void)
 
 
 /* ------------------------------------------------------------------------
- * 6. Data frame (docs/protocol.md, version 1, little-endian)
+ * 8. Data frame (docs/protocol.md, version 1, little-endian)
  * ------------------------------------------------------------------------ */
 
 /* Sequence number. It only goes up when a frame is really sent,
@@ -373,7 +545,7 @@ static void build_frame(uint8_t frame[FRAME_LEN])
 	sys_put_le16((uint16_t)temp_x100, &frame[7]); /* offset 7: temp (signed, same bits) */
 	sys_put_le16(hum_x100, &frame[9]);            /* offset 9: hum       */
 	sys_put_le16((uint16_t)water, &frame[11]);   /* offset 11: water    */
-	frame[13] = lying ? 1 : 0;                   /* offset 13: posture  */
+	frame[13] = lying ? 1 : 0;                   /* offset 13: posture (accelerometer) */
 	frame[14] = flags;                           /* offset 14: flags    */
 }
 
@@ -389,7 +561,7 @@ static void print_frame(const uint8_t frame[FRAME_LEN])
 
 
 /* ------------------------------------------------------------------------
- * 7. main: init + loop every 2 s
+ * 9. main: init + loop every 2 s
  * ------------------------------------------------------------------------ */
 
 int main(void)
@@ -419,6 +591,20 @@ int main(void)
 		printk("DHT11 device not ready\n");
 	}
 
+	/* Same idea: without the vibration sensor the flow stays at 0 (low water). */
+	err = vibration_init();
+	vib_ok = (err == 0);
+	if (err) {
+		printk("Vibration sensor init failed (err %d)\n", err);
+	}
+
+	/* Without the accelerometer the sow stays "standing" (no crush alarm). */
+	err = accel_init();
+	accel_ok = (err == 0);
+	if (err) {
+		printk("Accelerometer init failed (err %d)\n", err);
+	}
+
 	err = bt_enable(NULL);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
@@ -435,6 +621,7 @@ int main(void)
 		/* Sensor + simulation run always, even with no phone connected. */
 		read_dht();
 		update_water();
+		update_posture();
 
 		if (notify_enabled) {
 			build_frame(frame);
